@@ -5,21 +5,27 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
+    // Mostrar datos del usuario
     document.getElementById('username').textContent = user.username;
     document.getElementById('balance').textContent = user.balance;
     document.getElementById('referrals').textContent = user.referrals;
+    
+    // Actualizar enlaces de referencia
     document.querySelectorAll('#user-ref').forEach(el => {
         el.textContent = user.username;
     });
 });
 
-function copyLink(linkNum) {
-    const links = [
-        `https://ganadinerool.com/ref=${document.getElementById('username').textContent}`,
-        `https://ganadinerool.com/promo?ref=${document.getElementById('username').textContent}`,
-        `https://ganadinerool.com/offer?ref=${document.getElementById('username').textContent}`
-    ];
-    
-    navigator.clipboard.writeText(links[linkNum - 1]);
-    alert('Enlace copiado!');
+function copyLink(button) {
+    const linkText = button.previousElementSibling.textContent;
+    navigator.clipboard.writeText(linkText.trim())
+        .then(() => {
+            button.textContent = 'Copiado!';
+            setTimeout(() => {
+                button.textContent = 'Copiar';
+            }, 2000);
+        })
+        .catch(err => {
+            console.error('Error al copiar:', err);
+        });
 }
