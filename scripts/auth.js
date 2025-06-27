@@ -1,6 +1,6 @@
-const scriptURL = 'https://script.google.com/macros/s/AKfycby0W_4zgRb-DUSNCSxVrI_kAF5QuHrBGzMpqYOYbX9T-VJ2xgPX_WztZ3nrcqmGjp3C/exec';
+const scriptURL = 'https://script.google.com/macros/s/AKfycbxH_yr6YpIRtO6urW6dlPsCGmKO8a-AkrMVKhRl-gDSMVKFyyb_N3nskIGtlAy497Lo/exec';
 
-// Función para alternar entre login/registro
+// Función para alternar entre formularios
 function toggleForms() {
   const loginForm = document.getElementById('login-form');
   const registerForm = document.getElementById('register-form');
@@ -8,80 +8,115 @@ function toggleForms() {
   registerForm.style.display = registerForm.style.display === 'none' ? 'block' : 'none';
 }
 
-// Función para registrar usuario
+// Función mejorada para registrar usuarios
 async function register() {
-  const username = document.getElementById('register-username').value;
-  const email = document.getElementById('register-email').value;
-  const password = document.getElementById('register-password').value;
-
-  // Validación básica
-  if (!username || !email || !password) {
-    alert("Por favor completa todos los campos");
-    return;
-  }
+  const btnRegister = document.querySelector('#register-form button');
+  btnRegister.disabled = true;
+  btnRegister.textContent = 'Registrando...';
 
   try {
-    const response = await fetch(scriptURL, {
+    const data = {
+      action: 'register',
+      username: document.getElementById('register-username').value.trim(),
+      email: document.getElementById('register-email').value.trim(),
+      password: document.getElementById('register-password').value
+    };
+
+    // Validación básica
+    if (!data.username || !data.email || !data.password) {
+      throw new Error('Todos los campos son obligatorios');
+    }
+
+    const response = await fetchWithTimeout(scriptURL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        action: 'register',
-        username,
-        email,
-        password
-      })
-    });
-
-    if (!response.ok) throw new Error("Error en la conexión");
+      body: JSON.stringify(data)
+    }, 10000); // 10 segundos de timeout
 
     const result = await response.json();
-    
-    if (result.success) {
-      alert(result.message || "¡Registro exitoso!");
-      toggleForms();
-    } else {
-      throw new Error(result.message || "Error en el registro");
+
+    if (!result.success) {
+      throw new Error(result.message || 'Error en el registro');
     }
+
+    alert('¡Registro exitoso! Por favor inicia sesión');
+    toggleForms();
+    
   } catch (error) {
-    console.error("Error completo:", error);
-    alert("Error: " + error.message);
+    console.error('Error en registro:', error);
+    alert(`Error: ${error.message}`);
+  } finally {
+    btnRegister.disabled = false;
+    btnRegister.textContent = 'Crear cuenta';
   }
 }
 
-// Función para login
+// Función mejorada para login
 async function login() {
-  const email = document.getElementById('login-email').value;
-  const password = document.getElementById('login-password').value;
+  const btnLogin = document.querySelector('#login-form button');
+  btnLogin.disabled = true;
+  btnLogin.textContent = 'Iniciando...';
 
   try {
-    const response = await fetch(scriptURL, {
+    const data = {
+      action: 'login',
+      email: document.getElementById('login-email').value.trim(),
+      password: document.getElementById('login-password').value
+    };
+
+    const response = await fetchWithTimeout(scriptURL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        action: 'login',
-        email,
-        password
-      })
-    });
-
-    if (!response.ok) throw new Error("Error en la conexión");
+      body: JSON.stringify(data)
+    }, 10000); // 10 segundos de timeout
 
     const result = await response.json();
-    
-    if (result.success) {
-      // Guardar datos del usuario en localStorage
-      localStorage.setItem('user', JSON.stringify(result.user));
-      // Redirigir al panel
-      window.location.href = 'panel.html';
-    } else {
-      throw new Error(result.message || "Credenciales incorrectas");
+
+    if (!result.success) {
+      throw new Error(result.message || 'Credenciales incorrectas');
     }
+
+    // Guardar datos del usuario
+    localStorage.setItem('user', JSON.stringify(result.user));
+    window.location.href = 'panel.html';
+    
   } catch (error) {
-    console.error("Error completo:", error);
-    alert("Error: " + error.message);
+    console.error('Error en login:', error);
+    alert(`Error: ${error.message}`);
+  } finally {
+    btnLogin.disabled = false;
+    btnLogin.textContent = 'Acceder';
   }
+}
+
+// Función fetch con timeout
+function fetchWithTimeout(url, options, timeout) {
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    options.signal = signal;
+
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new Error('Tiempo de espera agotado'));
+    }, timeout);
+
+    fetch(url, options)
+      .then(response => {
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        resolve(response);
+      })
+      .catch(error => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
 }
