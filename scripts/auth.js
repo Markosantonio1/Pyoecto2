@@ -1,93 +1,153 @@
-const scriptURL = 'https://script.google.com/macros/s/AKfycbxXieBVWKgfq4QztWRggtfR1dSsOYdcI2Tl3rXn1OYQsDnNcqwjfa5yD7z8kzT50AGk/exec';
+// Configuración
+const scriptURL = 'https://script.google.com/macros/s/AKfycbxeoWtutKl8p3a4FBlTTMdFfJptDfUan8FWZY91qe_AT0SBx6AhNGBGemflAsnTIM8v/exec'; // Reemplaza TU_SCRIPT_ID
 
-// Función mejorada para hacer peticiones
+// Elementos del DOM
+const loginForm = document.getElementById('login-form');
+const registerForm = document.getElementById('register-form');
+const btnLogin = document.querySelector('#login-form button');
+const btnRegister = document.querySelector('#register-form button');
+
+// Función para hacer peticiones (optimizada para CORS)
 async function makeRequest(data) {
+  // URL con parámetro anti-cache y callback
+  const url = `${scriptURL}?callback=ctrlq&t=${Date.now()}`;
+  
   try {
-    // URL con parámetro para evitar CORS
-    const url = `${scriptURL}?callback=ctrlq&action=${data.action}`;
-    
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
+        'Content-Type': 'text/plain;charset=utf-8', // ¡Formato clave!
+        'X-Requested-With': 'XMLHttpRequest' // Ayuda con CORS
       },
       body: JSON.stringify(data),
-      redirect: 'follow'
+      redirect: 'follow',
+      mode: 'cors',
+      credentials: 'omit'
     });
 
-    if (!response.ok) throw new Error(`Error HTTP! estado: ${response.status}`);
-    
-    // Procesar respuesta
-    const text = await response.text();
-    try {
-      return JSON.parse(text);
-    } catch {
-      throw new Error("Respuesta no válida del servidor");
+    // Manejo especial de respuestas de Google Apps Script
+    if (response.redirected) {
+      return await handleRedirect(response);
     }
+
+    const text = await response.text();
+    
+    // Extraer JSON de posibles wrappers (para GAS)
+    try {
+      const json = JSON.parse(text.replace(/^.*?({.*}).*$/s, '$1'));
+      if (!json.success && !json.status) {
+        throw new Error("Respuesta no válida del servidor");
+      }
+      return json;
+    } catch (e) {
+      console.error("Error parseando respuesta:", e);
+      throw new Error("El servidor respondió con un formato inválido");
+    }
+    
   } catch (error) {
-    console.error("Error completo:", error);
-    throw error;
+    console.error("Error en la petición:", error);
+    throw new Error(error.message || "Error de conexión. Intenta recargando la página (F5)");
   }
 }
 
-// Función de registro
+// Manejo de redirecciones (para respuestas de GAS)
+async function handleRedirect(response) {
+  try {
+    const redirectURL = response.url;
+    const redirectedResponse = await fetch(redirectURL, {
+      method: 'GET',
+      mode: 'no-cors'
+    });
+    return await redirectedResponse.json();
+  } catch (e) {
+    throw new Error("Error procesando respuesta del servidor");
+  }
+}
+
+// Función de registro mejorada
 async function register() {
-  const btn = document.querySelector('#register-form button');
-  btn.disabled = true;
-  btn.textContent = 'Registrando...';
+  const username = document.getElementById('register-username').value.trim();
+  const email = document.getElementById('register-email').value.trim();
+  const password = document.getElementById('register-password').value;
+
+  // Validación básica
+  if (!username || !email || !password) {
+    alert("Todos los campos son obligatorios");
+    return;
+  }
+
+  btnRegister.disabled = true;
+  btnRegister.textContent = 'Registrando...';
 
   try {
     const result = await makeRequest({
       action: 'register',
-      username: document.getElementById('register-username').value.trim(),
-      email: document.getElementById('register-email').value.trim(),
-      password: document.getElementById('register-password').value
+      username,
+      email,
+      password
     });
 
-    if (!result.success) throw new Error(result.message);
-    
+    if (!result.success) {
+      throw new Error(result.message || "Error en el registro");
+    }
+
     alert("¡Registro exitoso! Por favor inicia sesión");
     toggleForms();
     
   } catch (error) {
+    console.error("Error en registro:", error);
     alert(`Error: ${error.message}`);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Crear cuenta';
+    btnRegister.disabled = false;
+    btnRegister.textContent = 'Crear cuenta';
   }
 }
 
-// Función de login
+// Función de login mejorada
 async function login() {
-  const btn = document.querySelector('#login-form button');
-  btn.disabled = true;
-  btn.textContent = 'Iniciando...';
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+
+  btnLogin.disabled = true;
+  btnLogin.textContent = 'Iniciando...';
 
   try {
     const result = await makeRequest({
       action: 'login',
-      email: document.getElementById('login-email').value.trim(),
-      password: document.getElementById('login-password').value
+      email,
+      password
     });
 
-    if (!result.success) throw new Error(result.message);
-    
+    if (!result.success) {
+      throw new Error(result.message || "Credenciales incorrectas");
+    }
+
     // Guardar datos del usuario
     localStorage.setItem('user', JSON.stringify(result.user));
     window.location.href = 'panel.html';
     
   } catch (error) {
+    console.error("Error en login:", error);
     alert(`Error: ${error.message}`);
   } finally {
-    btn.disabled = false;
-    btn.textContent = 'Acceder';
+    btnLogin.disabled = false;
+    btnLogin.textContent = 'Acceder';
   }
 }
 
 // Alternar entre formularios
 function toggleForms() {
-  const loginForm = document.getElementById('login-form');
-  const registerForm = document.getElementById('register-form');
   loginForm.style.display = loginForm.style.display === 'none' ? 'block' : 'none';
   registerForm.style.display = registerForm.style.display === 'none' ? 'block' : 'none';
+}
+
+// Event Listeners
+document.querySelector('#register-form a').addEventListener('click', toggleForms);
+document.querySelector('#login-form a').addEventListener('click', toggleForms);
+btnLogin.addEventListener('click', login);
+btnRegister.addEventListener('click', register);
+
+// Inicialización
+if (window.location.pathname.includes('panel.html') && !localStorage.getItem('user')) {
+  window.location.href = 'index.html';
 }
