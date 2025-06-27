@@ -1,4 +1,4 @@
-const scriptURL = 'https://script.google.com/macros/s/AKfycbzkjoPaxaOwwKcq5yYOYrGb8A7HwaozBWysKn0bUDn7ZUJbI4q0ON4fAyxeSFG-Dg0/exec';
+const scriptURL = 'https://script.google.com/macros/s/AKfycbygKqGf5xb0a7C2lHv3x0lKc3TXqv64gytF3vGpUTwT4ylfMGx8k_tHo4qoyei4fGw/exec';
 
 function toggleForms() {
     const loginForm = document.getElementById('login-form');
