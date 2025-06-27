@@ -1,122 +1,93 @@
-const scriptURL = 'https://script.google.com/macros/s/AKfycbxH_yr6YpIRtO6urW6dlPsCGmKO8a-AkrMVKhRl-gDSMVKFyyb_N3nskIGtlAy497Lo/exec';
+const scriptURL = 'https://script.google.com/macros/s/AKfycbxXieBVWKgfq4QztWRggtfR1dSsOYdcI2Tl3rXn1OYQsDnNcqwjfa5yD7z8kzT50AGk/exec';
 
-// Función para alternar entre formularios
-function toggleForms() {
-  const loginForm = document.getElementById('login-form');
-  const registerForm = document.getElementById('register-form');
-  loginForm.style.display = loginForm.style.display === 'none' ? 'block' : 'none';
-  registerForm.style.display = registerForm.style.display === 'none' ? 'block' : 'none';
+// Función mejorada para hacer peticiones
+async function makeRequest(data) {
+  try {
+    // URL con parámetro para evitar CORS
+    const url = `${scriptURL}?callback=ctrlq&action=${data.action}`;
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify(data),
+      redirect: 'follow'
+    });
+
+    if (!response.ok) throw new Error(`Error HTTP! estado: ${response.status}`);
+    
+    // Procesar respuesta
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error("Respuesta no válida del servidor");
+    }
+  } catch (error) {
+    console.error("Error completo:", error);
+    throw error;
+  }
 }
 
-// Función mejorada para registrar usuarios
+// Función de registro
 async function register() {
-  const btnRegister = document.querySelector('#register-form button');
-  btnRegister.disabled = true;
-  btnRegister.textContent = 'Registrando...';
+  const btn = document.querySelector('#register-form button');
+  btn.disabled = true;
+  btn.textContent = 'Registrando...';
 
   try {
-    const data = {
+    const result = await makeRequest({
       action: 'register',
       username: document.getElementById('register-username').value.trim(),
       email: document.getElementById('register-email').value.trim(),
       password: document.getElementById('register-password').value
-    };
+    });
 
-    // Validación básica
-    if (!data.username || !data.email || !data.password) {
-      throw new Error('Todos los campos son obligatorios');
-    }
-
-    const response = await fetchWithTimeout(scriptURL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(data)
-    }, 10000); // 10 segundos de timeout
-
-    const result = await response.json();
-
-    if (!result.success) {
-      throw new Error(result.message || 'Error en el registro');
-    }
-
-    alert('¡Registro exitoso! Por favor inicia sesión');
+    if (!result.success) throw new Error(result.message);
+    
+    alert("¡Registro exitoso! Por favor inicia sesión");
     toggleForms();
     
   } catch (error) {
-    console.error('Error en registro:', error);
     alert(`Error: ${error.message}`);
   } finally {
-    btnRegister.disabled = false;
-    btnRegister.textContent = 'Crear cuenta';
+    btn.disabled = false;
+    btn.textContent = 'Crear cuenta';
   }
 }
 
-// Función mejorada para login
+// Función de login
 async function login() {
-  const btnLogin = document.querySelector('#login-form button');
-  btnLogin.disabled = true;
-  btnLogin.textContent = 'Iniciando...';
+  const btn = document.querySelector('#login-form button');
+  btn.disabled = true;
+  btn.textContent = 'Iniciando...';
 
   try {
-    const data = {
+    const result = await makeRequest({
       action: 'login',
       email: document.getElementById('login-email').value.trim(),
       password: document.getElementById('login-password').value
-    };
+    });
 
-    const response = await fetchWithTimeout(scriptURL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(data)
-    }, 10000); // 10 segundos de timeout
-
-    const result = await response.json();
-
-    if (!result.success) {
-      throw new Error(result.message || 'Credenciales incorrectas');
-    }
-
+    if (!result.success) throw new Error(result.message);
+    
     // Guardar datos del usuario
     localStorage.setItem('user', JSON.stringify(result.user));
     window.location.href = 'panel.html';
     
   } catch (error) {
-    console.error('Error en login:', error);
     alert(`Error: ${error.message}`);
   } finally {
-    btnLogin.disabled = false;
-    btnLogin.textContent = 'Acceder';
+    btn.disabled = false;
+    btn.textContent = 'Acceder';
   }
 }
 
-// Función fetch con timeout
-function fetchWithTimeout(url, options, timeout) {
-  return new Promise((resolve, reject) => {
-    const controller = new AbortController();
-    const { signal } = controller;
-
-    options.signal = signal;
-
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-      reject(new Error('Tiempo de espera agotado'));
-    }, timeout);
-
-    fetch(url, options)
-      .then(response => {
-        clearTimeout(timeoutId);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        resolve(response);
-      })
-      .catch(error => {
-        clearTimeout(timeoutId);
-        reject(error);
-      });
-  });
+// Alternar entre formularios
+function toggleForms() {
+  const loginForm = document.getElementById('login-form');
+  const registerForm = document.getElementById('register-form');
+  loginForm.style.display = loginForm.style.display === 'none' ? 'block' : 'none';
+  registerForm.style.display = registerForm.style.display === 'none' ? 'block' : 'none';
 }
