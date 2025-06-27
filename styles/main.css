@@ -1,0 +1,68 @@
+body {
+    margin: 0;
+    font-family: 'Arial', sans-serif;
+    background-color: #0a0a1a;
+    color: #e0e0e0;
+}
+
+.futuristic-bg {
+    background: linear-gradient(135deg, #0f0f2d, #1a1a4a);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+    width: 90%;
+    max-width: 400px;
+    text-align: center;
+}
+
+.ad-banner {
+    background: linear-gradient(90deg, #6e48aa, #9d50bb);
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 30px;
+    box-shadow: 0 0 20px rgba(110, 72, 170, 0.5);
+}
+
+.auth-form {
+    background: rgba(30, 30, 60, 0.8);
+    padding: 30px;
+    border-radius: 15px;
+    box-shadow: 0 0 25px rgba(0, 255, 255, 0.2);
+}
+
+input {
+    width: 100%;
+    padding: 12px;
+    margin: 10px 0;
+    border: 1px solid #4a4a8a;
+    background: rgba(20, 20, 40, 0.8);
+    color: #fff;
+    border-radius: 5px;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(90deg, #00c9ff, #92fe9d);
+    border: none;
+    color: #0a0a1a;
+    font-weight: bold;
+    border-radius: 5px;
+    cursor: pointer;
+    margin-top: 15px;
+    transition: all 0.3s;
+}
+
+button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 201, 255, 0.4);
+}
+
+a {
+    color: #00c9ff;
+    text-decoration: none;
+}
