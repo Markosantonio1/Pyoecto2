@@ -34,35 +34,26 @@ body {
     box-shadow: 0 0 25px rgba(0, 255, 255, 0.2);
 }
 
-input {
-    width: 100%;
-    padding: 12px;
-    margin: 10px 0;
-    border: 1px solid #4a4a8a;
-    background: rgba(20, 20, 40, 0.8);
-    color: #fff;
-    border-radius: 5px;
+.user-panel {
+    background: rgba(30, 30, 60, 0.9);
+    padding: 30px;
+    border-radius: 15px;
+    box-shadow: 0 0 25px rgba(0, 255, 255, 0.3);
 }
 
-button {
-    width: 100%;
-    padding: 12px;
-    background: linear-gradient(90deg, #00c9ff, #92fe9d);
-    border: none;
-    color: #0a0a1a;
-    font-weight: bold;
-    border-radius: 5px;
-    cursor: pointer;
-    margin-top: 15px;
-    transition: all 0.3s;
+.link-item {
+    display: flex;
+    align-items: center;
+    margin: 15px 0;
+    background: rgba(20, 20, 40, 0.7);
+    padding: 10px;
+    border-radius: 8px;
 }
 
-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(0, 201, 255, 0.4);
+.link-text {
+    flex: 1;
+    word-break: break-all;
+    margin-right: 10px;
 }
 
-a {
-    color: #00c9ff;
-    text-decoration: none;
-}
+/* Resto de tus estilos... */
