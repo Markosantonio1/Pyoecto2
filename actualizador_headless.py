@@ -52,6 +52,7 @@ WORK_DIR = Path(os.getenv("WORK_DIR", str(BASE_DIR / "work")))
 PDF_DIR = WORK_DIR / "pdfs"
 TMP_DIR = WORK_DIR / "tmp"
 CACHE_FILE = WORK_DIR / "suwayomi_cache.json"
+CHECKPOINT_FILE = WORK_DIR / "checkpoint.json"
 
 SUWAYOMI_URL = os.getenv("SUWAYOMI_URL", "http://127.0.0.1:4567").rstrip("/")
 GRAPHQL_URL = f"{SUWAYOMI_URL}/api/graphql"
@@ -65,6 +66,9 @@ MAX_WORKERS = int(os.getenv("SCAN_WORKERS", "4"))
 PACKAGE_SIZE = 10
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "35"))
 MAX_SERIES = int(os.getenv("MAX_SERIES", "0"))
+RUN_DEADLINE_SECONDS = int(os.getenv("RUN_DEADLINE_SECONDS", "9000"))
+MAX_RUNS = int(os.getenv("MAX_RUNS", "30"))
+CHECKPOINT_EXIT = 75
 
 TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "")
 TELEGRAM_API_ID = os.getenv("TELEGRAM_API_ID", "")
@@ -111,6 +115,23 @@ def save_json(path: Path, data) -> None:
         encoding="utf-8",
     )
     os.replace(tmp, path)
+
+
+def load_checkpoint() -> dict:
+    data = load_json(CHECKPOINT_FILE, {})
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("run_count", 0)
+    data.setdefault("done", [])
+    data.setdefault("results", [])
+    data.setdefault("uploaded", [])
+    data.setdefault("total", 0)
+    data.setdefault("finished", False)
+    return data
+
+
+def save_checkpoint(checkpoint: dict) -> None:
+    save_json(CHECKPOINT_FILE, checkpoint)
 
 
 def normalize(value: str) -> str:
@@ -375,47 +396,68 @@ def scan_one(item: dict, sources: list[dict], cached: list[dict]) -> Optional[di
     }
 
 
-def scan_all() -> list[dict]:
+def scan_all(catalog: list[dict], checkpoint: dict, deadline: float) -> bool:
+    """Escanea lo pendiente. Devuelve False si se agotó el tiempo."""
+    done_tags = set(checkpoint.get("done") or [])
+    results = list(checkpoint.get("results") or [])
+    result_tags = {r["hashtag"] for r in results}
+
+    pending = [item for item in catalog if item["hashtag"] not in done_tags]
     set_progress(
-        phase="catalog",
-        message="Cargando catálogo...",
-        series_total=0,
-        series_done=0,
-        gaps=0,
-        new_chapters=0,
+        phase="scanning",
+        message=f"Escaneando {len(pending)} series pendientes...",
+        series_total=len(catalog),
+        series_done=len(done_tags),
+        gaps=sum(len(r.get("gaps", [])) for r in results),
+        new_chapters=sum(len(r.get("new_chapters", [])) for r in results),
     )
-    catalog = load_catalog()
-    if not catalog:
-        raise RuntimeError("catalog.json vacío o no encontrado en data/.")
+    if not pending:
+        return True
 
-    set_progress(series_total=len(catalog), message="Conectando con Suwayomi...")
-    sources = get_sources()
-    cached = get_cached_mangas()
-    log(f"Series: {len(catalog)} · fuentes: {len(sources)} · cacheadas: {len(cached)}")
+    try:
+        sources = get_sources()
+        cached = get_cached_mangas()
+    except Exception as exc:
+        raise RuntimeError(f"Suwayomi no responde: {exc}")
 
-    results = []
-    done = 0
+    log(
+        f"Series: {len(catalog)} · pendientes: {len(pending)} · "
+        f"fuentes: {len(sources)} · cacheadas: {len(cached)}"
+    )
+
     pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
     futures = {
         pool.submit(scan_one, item, sources, cached): item
-        for item in catalog
+        for item in pending
     }
+    timed_out = False
     try:
         for future in as_completed(futures):
+            if time.monotonic() >= deadline:
+                timed_out = True
+                log("Tiempo límite alcanzado; guardando progreso.")
+                break
             item = futures[future]
-            done += 1
             try:
                 result = future.result()
-                if result:
+                if result and item["hashtag"] not in result_tags:
                     results.append(result)
+                    result_tags.add(item["hashtag"])
             except Exception as exc:
                 log(f"Error con {item['hashtag']}: {exc}")
+
+            done_tags.add(item["hashtag"])
+            checkpoint["done"] = sorted(done_tags)
+            checkpoint["results"] = results
+            checkpoint["total"] = len(catalog)
+            save_checkpoint(checkpoint)
+
             set_progress(
-                series_done=done,
+                series_done=len(done_tags),
                 current=item["title"],
                 gaps=sum(len(r["gaps"]) for r in results),
                 new_chapters=sum(len(r["new_chapters"]) for r in results),
-                message=f"Escaneando {done}/{len(catalog)}...",
+                message=f"Escaneando {len(done_tags)}/{len(catalog)}...",
             )
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
@@ -427,11 +469,9 @@ def scan_all() -> list[dict]:
             r.get("title", "").lower(),
         )
     )
-    set_progress(
-        phase="downloading",
-        message=f"Listo: {len(results)} series con faltantes o nuevos.",
-    )
-    return results
+    checkpoint["results"] = results
+    save_checkpoint(checkpoint)
+    return not timed_out
 
 
 # ============================================================
@@ -540,17 +580,15 @@ def build_groups(chapter_pdfs: list[tuple[int, Path]]) -> list[tuple[list[tuple[
     groups = []
     for run in contiguous_runs(list(by_number)):
         items = [(n, by_number[n]) for n in run]
-        if len(items) >= 10:
-            groups.append((items, True))
-        elif len(items) >= 5:
-            for start in range(0, len(items), 5):
-                chunk = items[start:start + 5]
-                if len(chunk) == 5:
-                    groups.append((chunk, True))
-                else:
-                    groups.extend(([item], False) for item in chunk)
-        else:
-            groups.extend(([item], False) for item in items)
+        # Nunca superar 10 capítulos por PDF.
+        while len(items) >= 10:
+            groups.append((items[:10], True))
+            items = items[10:]
+        if len(items) >= 5:
+            groups.append((items[:5], True))
+            items = items[5:]
+        for item in items:
+            groups.append(([item], False))
     return groups
 
 
@@ -726,16 +764,83 @@ async def main() -> int:
     reporter = Reporter(client)
     reporter_task = asyncio.create_task(reporter.loop())
 
+    started = time.monotonic()
+    deadline = started + RUN_DEADLINE_SECONDS
+    checkpoint = load_checkpoint()
+    checkpoint["run_count"] = int(checkpoint.get("run_count", 0)) + 1
+    save_checkpoint(checkpoint)
+    log(
+        f"Run {checkpoint['run_count']}/{MAX_RUNS} · "
+        f"límite {RUN_DEADLINE_SECONDS // 60} min"
+    )
+
+    if checkpoint["run_count"] > MAX_RUNS:
+        set_progress(
+            phase="error",
+            message=f"Se alcanzó el máximo de {MAX_RUNS} runs.",
+            finished=True,
+        )
+        return 3
+
+    if checkpoint.get("finished"):
+        set_progress(phase="done", message="Ya estaba terminado.", finished=True)
+        return 0
+
     try:
-        results = await asyncio.to_thread(scan_all)
+        catalog = await asyncio.to_thread(load_catalog)
+        if not catalog:
+            raise RuntimeError("catalog.json vacío o no encontrado en data/.")
+        checkpoint["total"] = len(catalog)
+        save_checkpoint(checkpoint)
+
+        completed = await asyncio.to_thread(
+            scan_all,
+            catalog,
+            checkpoint,
+            deadline,
+        )
+        if not completed:
+            set_progress(
+                phase="paused",
+                message=(
+                    "Pausa de 2h30: progreso guardado. "
+                    "Se iniciará otro run automáticamente."
+                ),
+                finished=True,
+            )
+            save_checkpoint(checkpoint)
+            return CHECKPOINT_EXIT
+
+        results = checkpoint.get("results") or []
         set_progress(
             phase="uploading",
             message=f"Series con faltantes/nuevos: {len(results)}",
+            series_total=len(catalog),
+            series_done=len(catalog),
         )
 
+        uploaded = set(checkpoint.get("uploaded") or [])
         for index, result in enumerate(results, start=1):
-            if not result.get("gaps") and not result.get("new_chapters"):
+            if time.monotonic() >= deadline:
+                set_progress(
+                    phase="paused",
+                    message=(
+                        "Pausa de 2h30 durante subida: "
+                        "progreso guardado. Se iniciará otro run."
+                    ),
+                    finished=True,
+                )
+                save_checkpoint(checkpoint)
+                return CHECKPOINT_EXIT
+
+            if result["hashtag"] in uploaded:
                 continue
+            if not result.get("gaps") and not result.get("new_chapters"):
+                uploaded.add(result["hashtag"])
+                checkpoint["uploaded"] = sorted(uploaded)
+                save_checkpoint(checkpoint)
+                continue
+
             set_progress(
                 current=f"{index}/{len(results)} · {result['title']}",
                 message=f"Descargando {result['title']}",
@@ -747,6 +852,7 @@ async def main() -> int:
                 log(f"❌ Error descargando {result['title']}: {exc}")
                 files = []
 
+            all_ok = bool(files)
             for file_path in files:
                 path = Path(file_path)
                 label = "Respaldo" if result.get("backup") else "Principal"
@@ -760,15 +866,31 @@ async def main() -> int:
                     except Exception:
                         pass
                 else:
+                    all_ok = False
                     PROGRESS["pdfs_failed"] += 1
                     log(f"❌ No subido: {path.name}")
 
-            # Limpiar temporales de esta serie.
+            if all_ok:
+                uploaded.add(result["hashtag"])
+                checkpoint["uploaded"] = sorted(uploaded)
+                save_checkpoint(checkpoint)
+            else:
+                log(f"Se reintentará {result['title']} en el siguiente run.")
+
             try:
-                shutil.rmtree(TMP_DIR / safe_filename(result["title"]), ignore_errors=True)
+                shutil.rmtree(
+                    TMP_DIR / safe_filename(result["title"]),
+                    ignore_errors=True,
+                )
             except Exception:
                 pass
 
+        checkpoint["finished"] = True
+        save_checkpoint(checkpoint)
+        try:
+            CHECKPOINT_FILE.unlink()
+        except Exception:
+            pass
         set_progress(
             phase="done",
             message="Proceso terminado.",
