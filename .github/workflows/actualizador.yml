@@ -52,6 +52,7 @@ jobs:
         run: |
           mkdir -p data work
           mkdir -p "$HOME/.local/share/Tachidesk/extensions"
+          cp suwayomi/server.conf "$HOME/.local/share/Tachidesk/server.conf"
           cp suwayomi/extensions/*.jar "$HOME/.local/share/Tachidesk/extensions/"
           ls -lh "$HOME/.local/share/Tachidesk/extensions/"
 
@@ -97,6 +98,25 @@ jobs:
       - name: Instalar extensiones
         run: |
           python tools/install_extensions.py
+
+      - name: Reiniciar Suwayomi
+        run: |
+          if [ -f "$RUNNER_TEMP/suwayomi.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/suwayomi.pid")" 2>/dev/null || true
+          fi
+          sleep 5
+          nohup java -jar "$RUNNER_TEMP/suwayomi.jar" \
+            > "$RUNNER_TEMP/suwayomi.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/suwayomi.pid"
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:4567/api/graphql \
+              -H 'Content-Type: application/json' \
+              -d '{"query":"{ aboutServer { name version } }"}' >/dev/null; then
+              echo "Suwayomi reiniciado"
+              break
+            fi
+            sleep 2
+          done
 
       - name: Verificar fuentes
         run: |
