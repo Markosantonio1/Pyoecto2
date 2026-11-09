@@ -1,6 +1,6 @@
 """
-Instala las extensiones necesarias en el Suwayomi del runner.
-Se ejecuta después de que el servidor responde en 127.0.0.1:4567.
+Instala las extensiones necesarias en la tienda de Suwayomi.
+El workflow reinicia Suwayomi después para que cargue las fuentes.
 """
 
 from __future__ import annotations
@@ -41,7 +41,10 @@ def gql(query: str, variables=None) -> dict:
 
 def main() -> int:
     print("Actualizando tienda de extensiones...")
-    gql("mutation { fetchExtensions(input: {}) { clientMutationId } }")
+    try:
+        gql("mutation { fetchExtensions(input: {}) { clientMutationId } }")
+    except Exception as exc:
+        print(f"AVISO al refrescar la tienda: {exc}")
 
     install = """
     mutation Install($input: UpdateExtensionInput!) {
@@ -59,23 +62,17 @@ def main() -> int:
                     "patch": {"install": True},
                 }
             })
-            ext = data.get("updateExtension", {}).get("extension", {})
-            print(f"OK {package} -> {ext.get('name')} instalada={ext.get('isInstalled')}")
+            result = data.get("updateExtension") or {}
+            ext = result.get("extension") or {}
+            print(
+                f"OK {package} -> "
+                f"{ext.get('name')} instalada={ext.get('isInstalled')}"
+            )
         except Exception as exc:
             print(f"AVISO {package}: {exc}")
+        time.sleep(1)
 
-    # Esperar a que las fuentes aparezcan.
-    query = "{ sources { nodes { id name displayName lang } } }"
-    for attempt in range(30):
-        data = gql(query)
-        nodes = data.get("sources", {}).get("nodes", [])
-        print(f"Fuentes ({attempt + 1}/30): {[(n.get('displayName'), n.get('lang')) for n in nodes]}")
-        if len(nodes) > 1:
-            return 0
-        time.sleep(3)
-
-    print("No aparecieron fuentes distintas de Local source.")
-    return 1
+    return 0
 
 
 if __name__ == "__main__":
