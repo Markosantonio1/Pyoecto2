@@ -1,0 +1,125 @@
+name: Actualizador Suwayomi
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actualizador
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    env:
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+      TELEGRAM_UPLOAD_CHAT: ${{ secrets.TELEGRAM_UPLOAD_CHAT }}
+      PROGRESS_CHAT: ${{ secrets.PROGRESS_CHAT }}
+      SUWAYOMI_URL: http://127.0.0.1:4567
+      SCAN_WORKERS: "4"
+      REQUEST_TIMEOUT: "35"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Preparar carpetas
+        run: |
+          mkdir -p data work
+          mkdir -p "$HOME/.local/share/Tachidesk/extensions"
+          cp suwayomi/extensions/*.jar "$HOME/.local/share/Tachidesk/extensions/"
+          ls -lh "$HOME/.local/share/Tachidesk/extensions/"
+
+      - name: Descargar catálogo
+        env:
+          CATALOG_URL: ${{ secrets.CATALOG_URL }}
+          ALIASES_URL: ${{ secrets.ALIASES_URL }}
+        run: |
+          CATALOG="${CATALOG_URL:-https://raw.githubusercontent.com/Markosantonio1/manhuas-catalog/main/catalog.json}"
+          curl -fL --retry 3 "$CATALOG" -o data/catalog.json
+          if [ -n "$ALIASES_URL" ]; then
+            curl -fL --retry 3 "$ALIASES_URL" -o data/aliases.json || true
+          fi
+          test -s data/aliases.json || echo "Sin aliases; se continúa con el catálogo."
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          c = json.loads(Path("data/catalog.json").read_text(encoding="utf-8"))
+          print("catálogo:", len(c.get("series", [])), "series")
+          PY
+
+      - name: Descargar Suwayomi
+        run: |
+          URL=$(curl -fsSL https://api.github.com/repos/Suwayomi/Suwayomi-Server/releases/latest \
+            | python -c 'import json,sys; d=json.load(sys.stdin); print(next(a["browser_download_url"] for a in d["assets"] if a["name"].endswith(".jar")))')
+          echo "Suwayomi: $URL"
+          curl -fL --retry 3 "$URL" -o "$RUNNER_TEMP/suwayomi.jar"
+
+      - name: Arrancar Suwayomi
+        run: |
+          nohup java -jar "$RUNNER_TEMP/suwayomi.jar" \
+            > "$RUNNER_TEMP/suwayomi.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/suwayomi.pid"
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:4567/api/graphql \
+              -H 'Content-Type: application/json' \
+              -d '{"query":"{ aboutServer { name version } }"}' >/dev/null; then
+              echo "Suwayomi listo"
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:4567/api/graphql \
+            -H 'Content-Type: application/json' \
+            -d '{"query":"{ sources { nodes { id name displayName lang } } }"}' \
+            > "$RUNNER_TEMP/sources.json"
+          python - <<'PY'
+          import json, os
+          data = json.load(open(os.environ["RUNNER_TEMP"] + "/sources.json", encoding="utf-8"))
+          nodes = data.get("data", {}).get("sources", {}).get("nodes", [])
+          print("Fuentes cargadas:", [(n.get("displayName"), n.get("lang")) for n in nodes])
+          if not nodes:
+              raise SystemExit("Suwayomi no cargó extensiones/fuentes")
+          PY
+
+      - name: Ejecutar actualizador
+        run: |
+          python actualizador_headless.py
+
+      - name: Mostrar log de Suwayomi si falla
+        if: failure()
+        run: |
+          tail -n 200 "$RUNNER_TEMP/suwayomi.log" || true
+
+      - name: Limpiar
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/suwayomi.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/suwayomi.pid")" 2>/dev/null || true
+          fi
+          rm -rf work
