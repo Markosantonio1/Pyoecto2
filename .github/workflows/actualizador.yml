@@ -26,6 +26,8 @@ jobs:
       SUWAYOMI_URL: http://127.0.0.1:4567
       SCAN_WORKERS: "4"
       REQUEST_TIMEOUT: "35"
+      RUN_DEADLINE_SECONDS: "9000"
+      MAX_RUNS: "30"
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -51,10 +53,22 @@ jobs:
       - name: Preparar carpetas
         run: |
           mkdir -p data work
+          test -f suwayomi/server.conf
+          grep -q "keiyoushi" suwayomi/server.conf
           mkdir -p "$HOME/.local/share/Tachidesk/extensions"
           cp suwayomi/server.conf "$HOME/.local/share/Tachidesk/server.conf"
+          echo "Tienda configurada:"
+          grep -A2 extensionStores "$HOME/.local/share/Tachidesk/server.conf"
           cp suwayomi/extensions/*.jar "$HOME/.local/share/Tachidesk/extensions/"
           ls -lh "$HOME/.local/share/Tachidesk/extensions/"
+
+      - name: Restaurar progreso anterior
+        uses: actions/cache/restore@v4
+        with:
+          path: work/checkpoint.json
+          key: actualizador-${{ github.run_id }}
+          restore-keys: |
+            actualizador-
 
       - name: Descargar catálogo
         env:
@@ -134,8 +148,39 @@ jobs:
           PY
 
       - name: Ejecutar actualizador
+        id: run
+        continue-on-error: true
         run: |
+          set +e
           python actualizador_headless.py
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Guardar progreso para el siguiente run
+        if: steps.run.outputs.code == '75'
+        uses: actions/cache/save@v4
+        with:
+          path: work/checkpoint.json
+          key: actualizador-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Iniciar siguiente run
+        if: steps.run.outputs.code == '75'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          gh workflow run actualizador.yml --ref "${GITHUB_REF_NAME}"
+
+      - name: Comprobar resultado
+        if: ${{ steps.run.outputs.code != '0' && steps.run.outputs.code != '75' }}
+        run: exit 1
+
+      - name: Borrar checkpoint terminado
+        if: steps.run.outputs.code == '0'
+        env:
+          GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+        run: |
+          gh cache delete --all --ref "${GITHUB_REF_NAME}" || true
 
       - name: Mostrar log de Suwayomi si falla
         if: failure()
