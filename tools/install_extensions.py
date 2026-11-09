@@ -46,6 +46,13 @@ def main() -> int:
     except Exception as exc:
         print(f"AVISO al refrescar la tienda: {exc}")
 
+    try:
+        data = gql("{ extensions { totalCount } }")
+        count = (data.get("extensions") or {}).get("totalCount")
+        print(f"Extensiones en tienda: {count}")
+    except Exception as exc:
+        print(f"AVISO consultando tienda: {exc}")
+
     install = """
     mutation Install($input: UpdateExtensionInput!) {
       updateExtension(input: $input) {
