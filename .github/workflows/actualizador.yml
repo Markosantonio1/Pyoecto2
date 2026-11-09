@@ -94,6 +94,12 @@ jobs:
             fi
             sleep 2
           done
+      - name: Instalar extensiones
+        run: |
+          python tools/install_extensions.py
+
+      - name: Verificar fuentes
+        run: |
           curl -fsS http://127.0.0.1:4567/api/graphql \
             -H 'Content-Type: application/json' \
             -d '{"query":"{ sources { nodes { id name displayName lang } } }"}' \
@@ -103,8 +109,8 @@ jobs:
           data = json.load(open(os.environ["RUNNER_TEMP"] + "/sources.json", encoding="utf-8"))
           nodes = data.get("data", {}).get("sources", {}).get("nodes", [])
           print("Fuentes cargadas:", [(n.get("displayName"), n.get("lang")) for n in nodes])
-          if not nodes:
-              raise SystemExit("Suwayomi no cargó extensiones/fuentes")
+          if len(nodes) < 2:
+              raise SystemExit("Suwayomi no cargó las extensiones/fuentes")
           PY
 
       - name: Ejecutar actualizador
